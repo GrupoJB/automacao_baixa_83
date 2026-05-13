@@ -9,9 +9,9 @@ chromium.use(stealth);
 
 // --- CONFIGURAÇÃO DE USUÁRIOS ---
 const USERS = [
-    { email: 'gabriel.silva@transcleber.com.br', pass: 'Gabr2312!*' },
     { email: 'luhan.vinicius@transcleber.com.br', pass: 'Luhan123@@' },
-    { email: 'maria.esther@transcleber.com.br', pass: 'TheraJob@7' }
+    { email: 'victor.silva@transcleber.com.br', pass: 'Victor18@' },
+    { email: 'gabriel.silva@transcleber.com.br', pass: 'Gabr2312!*' }
 ];
 
 // --- CONFIGURAÇÃO DE FILIAIS ---
@@ -98,7 +98,7 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
 
     const currentUser = USERS[userIndex];
     const stateFile = `state_${currentUser.email.split('@')[0]}.json`;
-    
+
     console.log(`\n================================================`);
     console.log(`USUÁRIO: ${currentUser.email}`);
     console.log(`PROCESSO: ${FILIAIS[cdIndex].nome} (${cdIndex + 1}/${FILIAIS.length})`);
@@ -135,13 +135,13 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
                     await browser.close();
                     return run(userIndex + 1, cdIndex, periodIdx, selectedPeriods);
                 }
-            } catch (e) {}
+            } catch (e) { }
 
             try {
                 const popupOk = page.locator('#usuarioLogadoOK');
                 await popupOk.waitFor({ state: 'visible', timeout: 5000 });
                 await popupOk.click();
-            } catch (e) {}
+            } catch (e) { }
 
             await page.waitForURL(url => url.toString().includes('private'), { timeout: 30000 });
             await page.goto(process.env.REPORT_URL, { waitUntil: 'networkidle' });
@@ -168,7 +168,7 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
             // Recarregar a página para limpar qualquer estado anterior do calendário
             console.log('Resetando página para novo período...');
             await page.goto(process.env.REPORT_URL, { waitUntil: 'networkidle' });
-            
+
             // Re-selecionar o relatório (14 e 83) após o reset
             console.log('Configurando filtros de relatório (14 e 83)...');
             await page.locator('div[id="form:grupo"] .ui-selectonemenu-trigger').click();
@@ -209,17 +209,17 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
                 if (!dateSet) {
                     console.log(`Configurando datas (${period.label})...`);
                     const dateInputs = page.locator('input[id$="data__input"]');
-                    
+
                     if (period.isLastMonth) {
                         // Como a página foi resetada, o calendário SEMPRE começa no mês atual.
                         // Para o mês passado, basta clicar em "Voltar" (prev) UMA vez.
-                        
+
                         await dateInputs.first().click();
                         await page.waitForTimeout(500);
-                        await page.click('.ui-datepicker-prev:visible'); 
+                        await page.click('.ui-datepicker-prev:visible');
                         await page.waitForTimeout(500);
                         await page.click(`.ui-datepicker-calendar:visible a:text-is("${period.start}")`);
-                        
+
                         await dateInputs.last().click();
                         await page.waitForTimeout(500);
                         await page.click('.ui-datepicker-prev:visible');
@@ -258,11 +258,11 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
                         await browser.close();
                         return run(userIndex + 1, i, j, selectedPeriods);
                     }
-                } catch (e) {}
+                } catch (e) { }
 
                 console.log('Aguardando carregamento...');
                 const loading = page.locator('.ui-dialog:visible:has-text("Carregando...")');
-                await loading.waitFor({ state: 'visible', timeout: 3000 }).catch(() => {});
+                await loading.waitFor({ state: 'visible', timeout: 3000 }).catch(() => { });
                 await loading.waitFor({ state: 'hidden', timeout: 180000 });
 
                 console.log('Iniciando download...');
@@ -270,7 +270,7 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
                 const downloadBtn = page.locator('button').filter({ hasText: /^Download de Arquivo CSV - separado por ','$/ }).first();
                 await downloadBtn.scrollIntoViewIfNeeded();
                 await downloadBtn.waitFor({ state: 'visible', timeout: 30000 });
-                
+
                 const downloadPromise = page.waitForEvent('download', { timeout: 180000 });
                 await downloadBtn.evaluate(el => el.click());
                 const download = await downloadPromise;
@@ -288,13 +288,13 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
 
     } catch (error) {
         console.error('❌ Erro crítico:', error);
-        await browser.close().catch(() => {});
+        await browser.close().catch(() => { });
         if (userIndex + 1 < USERS.length) {
             console.log('🔄 Tentando recuperar com próximo usuário...');
             return run(userIndex + 1, cdIndex, periodIdx, selectedPeriods);
         }
     } finally {
-        await browser.close().catch(() => {});
+        await browser.close().catch(() => { });
     }
 }
 
@@ -305,9 +305,9 @@ async function start() {
     console.log('1 - Baixar Mês ATUAL (Split 01 e 02)');
     console.log('2 - Baixar Mês PASSADO (Split 01 e 02)');
     console.log('3 - Baixar AMBOS (Atual + Passado)');
-    
+
     const opt = await question('\nEscolha uma opção: ');
-    
+
     const periods = getPeriods(opt);
     if (periods.length === 0) {
         console.log('Opção inválida.');
