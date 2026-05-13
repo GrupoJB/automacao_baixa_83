@@ -5,6 +5,7 @@ const fs = require('fs');
 const readline = require('readline');
 const SMB2 = require('smb2');
 const util = require('util');
+const os = require('os');
 const { execSync } = require('child_process');
 require('dotenv').config();
 
@@ -140,9 +141,9 @@ const storage = {
     async save(download, p) {
         const info = parsePath(p);
         console.log(`⏳ Baixando arquivo temporário...`);
-        const tempDir = path.join(process.cwd(), 'downloads');
-        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-        const tempPath = path.join(tempDir, `temp_${Date.now()}_${path.basename(p)}`);
+        
+        // Usar a pasta temporária do sistema para evitar erros de permissão EACCES
+        const tempPath = path.join(os.tmpdir(), `temp_${Date.now()}_${path.basename(p)}`);
         
         await download.saveAs(tempPath);
         console.log(`✅ Download concluído localmente (${(fs.statSync(tempPath).size / 1024).toFixed(1)} KB).`);
