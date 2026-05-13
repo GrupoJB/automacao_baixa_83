@@ -264,10 +264,9 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
         args: isHeadless ? ['--no-sandbox', '--disable-setuid-sandbox'] : ['--start-maximized']
     });
 
-    const contextOptions = fs.existsSync(stateFile) ? { storageState: stateFile } : {};
+    const stateFile = path.join(os.tmpdir(), `state_${currentUser.email.split('@')[0]}.json`);
     const context = await browser.newContext({
-        ...contextOptions,
-        viewport: null,
+        storageState: fs.existsSync(stateFile) ? stateFile : undefined,
         acceptDownloads: true
     });
 
