@@ -359,20 +359,33 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
                 console.log('Consultando...');
                 await page.click('.ui-dialog:visible button:has-text("consultar")');
 
-                // Verificação de Limite
-                try {
-                    const limitMsg = page.locator('text=/limite de execução/i');
-                    if (await limitMsg.count() > 0 && await limitMsg.first().isVisible({ timeout: 5000 })) {
-                        console.log('⚠️ Limite atingido. Trocando usuário...');
-                        await browser.close();
-                        return run(userIndex + 1, i, j, selectedPeriods);
-                    }
-                } catch (e) { }
-
                 console.log('Aguardando carregamento...');
                 const loading = page.locator('.ui-dialog:visible:has-text("Carregando...")');
-                await loading.waitFor({ state: 'visible', timeout: 3000 }).catch(() => { });
-                await loading.waitFor({ state: 'hidden', timeout: 180000 });
+                const limitMsg = page.locator('text=/limite de execução/i, .ui-messages-error-detail, .ui-growl-item-container');
+                
+                // Espera o carregamento sumir OU a mensagem de limite aparecer
+                await Promise.race([
+                    loading.waitFor({ state: 'hidden', timeout: 180000 }),
+                    limitMsg.waitFor({ state: 'visible', timeout: 180000 }).then(async () => {
+                        const text = await limitMsg.innerText();
+                        if (text.toLowerCase().includes('limite de execução')) {
+                            throw new Error('LIMITE_ATINGIDO');
+                        }
+                    })
+                ]).catch(err => {
+                    if (err.message === 'LIMITE_ATINGIDO' || (err.message && err.message.includes('timeout'))) {
+                        if (err.message === 'LIMITE_ATINGIDO') throw err;
+                    }
+                });
+
+                // Checagem de segurança pós-carregamento
+                if (await limitMsg.isVisible()) {
+                    const text = await limitMsg.innerText();
+                    if (text.toLowerCase().includes('limite de execução')) {
+                        console.log('⚠️ Limite atingido detectado após carregamento.');
+                        throw new Error('LIMITE_ATINGIDO');
+                    }
+                }
 
                 console.log('Iniciando download...');
                 await page.waitForTimeout(3000);
@@ -409,6 +422,14 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
         rl.close();
 
     } catch (error) {
+        if (error.message === 'LIMITE_ATINGIDO') {
+            console.log('\n================================================');
+            console.log('⚠️ LIMITE DIÁRIO ATINGIDO! TROCANDO DE USUÁRIO...');
+            console.log('================================================\n');
+            await browser.close().catch(() => { });
+            return run(userIndex + 1, cdIndex, periodIdx, selectedPeriods);
+        }
+        
         console.error('❌ Erro crítico:', error);
         await browser.close().catch(() => { });
         if (userIndex + 1 < USERS.length) {
