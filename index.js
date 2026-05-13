@@ -497,8 +497,26 @@ async function start() {
     console.log('1 - Baixar Mês ATUAL (Split 01 e 02)');
     console.log('2 - Baixar Mês PASSADO (Split 01 e 02)');
     console.log('3 - Baixar AMBOS (Atual + Passado)');
+    console.log('\n(Aguardando 15 segundos... Se nada for escolhido, a opção 3 será iniciada)');
 
-    const opt = await question('\nEscolha uma opção: ');
+    let resolved = false;
+    const opt = await new Promise(resolve => {
+        const timer = setTimeout(() => {
+            if (!resolved) {
+                resolved = true;
+                console.log('\n⏰ Tempo esgotado! Iniciando Opção 3 por padrão...');
+                resolve('3');
+            }
+        }, 15000);
+
+        rl.question('\nEscolha uma opção: ', (answer) => {
+            if (!resolved) {
+                resolved = true;
+                clearTimeout(timer);
+                resolve(answer || '3');
+            }
+        });
+    });
 
     const periods = getPeriods(opt);
     if (periods.length === 0) {
