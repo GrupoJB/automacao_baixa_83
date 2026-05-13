@@ -3,6 +3,8 @@ const stealth = require('puppeteer-extra-plugin-stealth')();
 const path = require('path');
 const fs = require('fs');
 const readline = require('readline');
+const SMB2 = require('smb2');
+const util = require('util');
 require('dotenv').config();
 
 chromium.use(stealth);
@@ -32,6 +34,93 @@ const rl = readline.createInterface({
 function question(query) {
     return new Promise(resolve => rl.question(query, resolve));
 }
+
+// --- LOGICA DE STORAGE (LOCAL OU SMB) ---
+let smbClient = null;
+
+function getSmbClient(share) {
+    if (smbClient) return smbClient;
+    smbClient = new SMB2({
+        share: share,
+        domain: process.env.SMB_DOMAIN,
+        username: process.env.SMB_USER,
+        password: process.env.SMB_PASS
+    });
+    smbClient.existsP = util.promisify(smbClient.exists);
+    smbClient.mkdirP = util.promisify(smbClient.mkdir);
+    smbClient.writeFileP = util.promisify(smbClient.writeFile);
+    smbClient.unlinkP = util.promisify(smbClient.unlink);
+    smbClient.statP = util.promisify(smbClient.stat);
+    return smbClient;
+}
+
+function parsePath(fullPath) {
+    const isSmb = fullPath.startsWith('//') || fullPath.startsWith('\\\\');
+    if (!isSmb) return { isSmb: false, path: fullPath };
+
+    const parts = fullPath.split(/[\\/]/).filter(Boolean);
+    const host = parts[0];
+    const shareName = parts[1];
+    const share = `\\\\${host}\\${shareName}`;
+    const relativePath = parts.slice(2).join('\\');
+
+    return { isSmb: true, share, relativePath };
+}
+
+const storage = {
+    async exists(p) {
+        const info = parsePath(p);
+        if (info.isSmb) {
+            const client = getSmbClient(info.share);
+            return await client.existsP(info.relativePath).catch(() => false);
+        }
+        return fs.existsSync(p);
+    },
+    async getMTime(p) {
+        const info = parsePath(p);
+        if (info.isSmb) {
+            const client = getSmbClient(info.share);
+            const stats = await client.statP(info.relativePath).catch(() => null);
+            return stats ? new Date(stats.mtime || stats.lastModificationTime) : null;
+        }
+        const stats = fs.statSync(p);
+        return stats.mtime;
+    },
+    async mkdir(p) {
+        const info = parsePath(p);
+        if (info.isSmb) {
+            const client = getSmbClient(info.share);
+            const parts = info.relativePath.split(/[\\/]/);
+            let current = '';
+            for (const part of parts) {
+                current = current ? path.join(current, part) : part;
+                const exists = await client.existsP(current).catch(() => false);
+                if (!exists) await client.mkdirP(current).catch(() => { });
+            }
+            return;
+        }
+        if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+    },
+    async save(download, p) {
+        const info = parsePath(p);
+        // Download temporário local (obrigatório para Playwright)
+        const tempDir = path.join(process.cwd(), 'downloads');
+        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+        const tempPath = path.join(tempDir, `temp_${Date.now()}_${path.basename(p)}`);
+        
+        await download.saveAs(tempPath);
+
+        if (info.isSmb) {
+            const client = getSmbClient(info.share);
+            const content = fs.readFileSync(tempPath);
+            await client.writeFileP(info.relativePath, content);
+            fs.unlinkSync(tempPath);
+        } else {
+            if (fs.existsSync(p)) fs.unlinkSync(p);
+            fs.renameSync(tempPath, p);
+        }
+    }
+};
 
 function getPeriods(option) {
     const now = new Date();
@@ -186,31 +275,17 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
                 const filial = FILIAIS[i];
 
                 // --- VERIFICAÇÃO INTELIGENTE DE HISTÓRICO ---
-                let baseOutputPath = process.env.BASE_OUTPUT_PATH || './downloads';
-                if (process.platform === 'linux') {
-                    // Converter caminhos Windows para Linux se necessário
-                    if (/^[a-zA-Z]:/.test(baseOutputPath)) {
-                        baseOutputPath = baseOutputPath.replace(/^[a-zA-Z]:/, '/mnt/c').replace(/\\/g, '/');
-                    } else if (baseOutputPath.startsWith('\\\\') || baseOutputPath.startsWith('//')) {
-                        // Tratar UNC Paths (ex: //server/share/path) convertendo para /mnt/share/path
-                        // Assume que o share está montado em /mnt/<nome_do_share>
-                        const parts = baseOutputPath.split(/[\\/]/).filter(Boolean);
-                        if (parts.length >= 2) {
-                            const share = parts[1];
-                            const subPath = parts.slice(2).join('/');
-                            baseOutputPath = `/mnt/${share}/${subPath}`;
-                        }
-                    }
-                }
-                const basePath = path.join(path.resolve(baseOutputPath), filial.pasta);
-                const finalPath = path.join(basePath, `${period.label}.csv`);
+                const baseOutputPath = process.env.BASE_OUTPUT_PATH || './downloads';
+                const finalPath = path.join(baseOutputPath, filial.pasta, `${period.label}.csv`);
 
-                if (fs.existsSync(finalPath)) {
-                    const stats = fs.statSync(finalPath);
-                    const diffMin = Math.round((new Date() - stats.mtime) / (1000 * 60));
-                    if (diffMin < 20) {
-                        console.log(`⏩ [${period.label}] ${filial.nome} já baixado há ${diffMin}min. Pulando...`);
-                        continue;
+                if (await storage.exists(finalPath)) {
+                    const mtime = await storage.getMTime(finalPath);
+                    if (mtime) {
+                        const diffMin = Math.round((new Date() - mtime) / (1000 * 60));
+                        if (diffMin < 20) {
+                            console.log(`⏩ [${period.label}] ${filial.nome} já baixado há ${diffMin}min. Pulando...`);
+                            continue;
+                        }
                     }
                 }
 
@@ -287,10 +362,9 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
                 await downloadBtn.evaluate(el => el.click());
                 const download = await downloadPromise;
 
-                // Usar os caminhos já calculados no início do loop (basePath e finalPath)
-                if (!fs.existsSync(basePath)) fs.mkdirSync(basePath, { recursive: true });
-                if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
-                await download.saveAs(finalPath);
+                // Usar a lógica de storage unificada
+                await storage.mkdir(path.dirname(finalPath));
+                await storage.save(download, finalPath);
                 console.log(`✅ Concluído: ${finalPath}`);
             }
         }
