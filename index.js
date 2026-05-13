@@ -368,8 +368,8 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
                 // Espera o carregamento sumir OU a mensagem de limite aparecer
                 await Promise.race([
                     loading.waitFor({ state: 'hidden', timeout: 180000 }),
-                    limitMsg.waitFor({ state: 'visible', timeout: 180000 }).then(async () => {
-                        const text = await limitMsg.innerText();
+                    limitMsg.first().waitFor({ state: 'visible', timeout: 180000 }).then(async () => {
+                        const text = await limitMsg.first().innerText();
                         if (text.toLowerCase().includes('limite de execução')) {
                             throw new Error('LIMITE_ATINGIDO');
                         }
@@ -381,8 +381,8 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
                 });
 
                 // Checagem de segurança pós-carregamento
-                if (await limitMsg.isVisible()) {
-                    const text = await limitMsg.innerText();
+                if (await limitMsg.first().isVisible()) {
+                    const text = await limitMsg.first().innerText();
                     if (text.toLowerCase().includes('limite de execução')) {
                         console.log('⚠️ Limite atingido detectado após carregamento.');
                         throw new Error('LIMITE_ATINGIDO');
