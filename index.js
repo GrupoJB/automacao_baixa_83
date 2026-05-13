@@ -27,13 +27,20 @@ const FILIAIS = [
     { nome: 'TERESINA', pasta: 'THE' }
 ];
 
-const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
-});
+let rl;
+function getRL() {
+    if (!rl) {
+        rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout,
+            terminal: false
+        });
+    }
+    return rl;
+}
 
 function question(query) {
-    return new Promise(resolve => rl.question(query, resolve));
+    return new Promise(resolve => getRL().question(query, resolve));
 }
 
 // --- LOGICA DE STORAGE (LOCAL OU SMB) ---
@@ -497,36 +504,40 @@ async function start() {
     console.log('1 - Baixar Mês ATUAL (Split 01 e 02)');
     console.log('2 - Baixar Mês PASSADO (Split 01 e 02)');
     console.log('3 - Baixar AMBOS (Atual + Passado)');
-    console.log('\n(Aguardando 15 segundos... Se nada for escolhido, a opção 3 será iniciada)');
-
-    let resolved = false;
-    const opt = await new Promise(resolve => {
-        const timer = setTimeout(() => {
-            if (!resolved) {
-                resolved = true;
+    
+    // Detecta se o ambiente é interativo (TTY)
+    const isInteractive = process.stdin.isTTY;
+    
+    let opt;
+    if (!isInteractive) {
+        console.log('\n🤖 Ambiente não-interativo detectado (Airflow).');
+        console.log('⏩ Selecionando Opção 3 automaticamente...');
+        opt = '3';
+    } else {
+        console.log('\n(Aguardando 15 segundos... Se nada for escolhido, a opção 3 será iniciada)');
+        opt = await new Promise(resolve => {
+            const timer = setTimeout(() => {
                 console.log('\n⏰ Tempo esgotado! Iniciando Opção 3 por padrão...');
                 resolve('3');
-            }
-        }, 15000);
+            }, 15000);
 
-        rl.question('\nEscolha uma opção: ', (answer) => {
-            if (!resolved) {
-                resolved = true;
+            getRL().question('\nEscolha uma opção: ', (answer) => {
                 clearTimeout(timer);
                 resolve(answer || '3');
-            }
+            });
         });
-    });
+    }
 
     const periods = getPeriods(opt);
     if (periods.length === 0) {
         console.log('Opção inválida.');
-        rl.close();
+        if (rl) rl.close();
         return;
     }
 
     console.log(`\nPeríodos: ${periods.map(p => p.label).join(' | ')}`);
     await run(0, 0, 0, periods);
+    if (rl) rl.close();
 }
 
 start();
