@@ -361,7 +361,9 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
 
                 console.log('Aguardando carregamento...');
                 const loading = page.locator('.ui-dialog:visible:has-text("Carregando...")');
-                const limitMsg = page.locator('text=/limite de execução/i, .ui-messages-error-detail, .ui-growl-item-container');
+                const limitMsg = page.locator('text=/limite de execução/i')
+                    .or(page.locator('.ui-messages-error-detail'))
+                    .or(page.locator('.ui-growl-item-container'));
                 
                 // Espera o carregamento sumir OU a mensagem de limite aparecer
                 await Promise.race([
