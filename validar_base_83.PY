@@ -1,6 +1,8 @@
-import os
 import re
 import pandas as pd
+import subprocess
+import tempfile
+import shutil
 from colorama import Fore, Style, init
 from dotenv import load_dotenv
 
@@ -11,18 +13,34 @@ load_dotenv()
 init(autoreset=True)
 
 # Caminho base da BASE FISCAL
+temp_dir_smb = None
+
 def get_base_path():
+    global temp_dir_smb
     path_env = os.getenv("BASE_OUTPUT_PATH")
     if not path_env:
         return "/mnt/c/Users/luhan.vinicius/grupojb.log.br/tc - DATABASE PAINEL/BASE FISCAL"
     
-    # Se estiver no Linux, converte //servidor/share para /mnt/share
+    # Se estiver no Linux e for um caminho SMB, usamos smbclient para baixar localmente
     if os.name == 'posix' and (path_env.startswith('//') or path_env.startswith('\\\\')):
         parts = [p for p in path_env.replace('\\', '/').split('/') if p]
         if len(parts) >= 2:
-            share = parts[1]
-            subpath = '/'.join(parts[2:])
-            return f"/mnt/{share}/{subpath}"
+            share = f"//{parts[0]}/{parts[1]}"
+            relative_path = '/'.join(parts[2:])
+            creds = f"{os.getenv('SMB_DOMAIN')}/{os.getenv('SMB_USER')}%{os.getenv('SMB_PASS')}"
+            
+            temp_dir_smb = tempfile.mkdtemp(prefix="smb_base_83_")
+            print(f"📡 Modo Linux: Baixando arquivos do SMB para {temp_dir_smb}...")
+            
+            # Comando para baixar tudo recursivamente
+            cmd = f"smbclient {share} -U '{creds}' -c 'cd \"{relative_path}\"; prompt; recurse; mget *' > /dev/null 2>&1"
+            try:
+                subprocess.run(cmd, shell=True, check=True, cwd=temp_dir_smb)
+                return temp_dir_smb
+            except Exception as e:
+                print(f"❌ Erro ao acessar SMB via smbclient: {e}")
+                print("⚠️ Certifique-se de que o smbclient está instalado e as credenciais no .env estão corretas.")
+                return path_env
     return path_env
 
 base_path = get_base_path()
