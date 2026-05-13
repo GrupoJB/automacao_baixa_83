@@ -193,9 +193,12 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
     console.log(`PROCESSO: ${FILIAIS[cdIndex].nome} (${cdIndex + 1}/${FILIAIS.length})`);
     console.log(`================================================\n`);
 
+    const isLinux = process.platform === 'linux';
+    const isHeadless = process.env.HEADLESS === 'true' || (process.env.HEADLESS === undefined && isLinux);
+
     const browser = await chromium.launch({
-        headless: false,
-        args: ['--start-maximized']
+        headless: isHeadless,
+        args: isHeadless ? ['--no-sandbox', '--disable-setuid-sandbox'] : ['--start-maximized']
     });
 
     const contextOptions = fs.existsSync(stateFile) ? { storageState: stateFile } : {};
