@@ -23,9 +23,11 @@ Se for rodar em um servidor Linux, você precisa instalar o navegador (Chromium)
 # Instalar o navegador
 npx playwright install chromium
 
-# Instalar dependências de sistema (bibliotecas de vídeo/gráficos que o Linux exige)
-npx playwright install-deps
+# Instalar dependências de sistema (Exige privilégios de administrador/sudo)
+sudo npx playwright install-deps
 ```
+
+> **Nota:** Caso não tenha acesso ao `sudo`, peça ao administrador do servidor para instalar as dependências do Playwright.
 
 ### 4. Execução
 Para iniciar a automação:
