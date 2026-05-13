@@ -194,7 +194,8 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
     console.log(`================================================\n`);
 
     const isLinux = process.platform === 'linux';
-    const isHeadless = process.env.HEADLESS === 'true' || (process.env.HEADLESS === undefined && isLinux);
+    // No Linux, o padrão é true (invisível). No Windows, o padrão é false (visível).
+    const isHeadless = isLinux ? (process.env.HEADLESS !== 'false') : (process.env.HEADLESS === 'true');
 
     const browser = await chromium.launch({
         headless: isHeadless,
