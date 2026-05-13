@@ -187,8 +187,20 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
 
                 // --- VERIFICAÇÃO INTELIGENTE DE HISTÓRICO ---
                 let baseOutputPath = process.env.BASE_OUTPUT_PATH || './downloads';
-                if (process.platform === 'linux' && /^[a-zA-Z]:/.test(baseOutputPath)) {
-                    baseOutputPath = baseOutputPath.replace(/^[a-zA-Z]:/, '/mnt/c').replace(/\\/g, '/');
+                if (process.platform === 'linux') {
+                    // Converter caminhos Windows para Linux se necessário
+                    if (/^[a-zA-Z]:/.test(baseOutputPath)) {
+                        baseOutputPath = baseOutputPath.replace(/^[a-zA-Z]:/, '/mnt/c').replace(/\\/g, '/');
+                    } else if (baseOutputPath.startsWith('\\\\') || baseOutputPath.startsWith('//')) {
+                        // Tratar UNC Paths (ex: //server/share/path) convertendo para /mnt/share/path
+                        // Assume que o share está montado em /mnt/<nome_do_share>
+                        const parts = baseOutputPath.split(/[\\/]/).filter(Boolean);
+                        if (parts.length >= 2) {
+                            const share = parts[1];
+                            const subPath = parts.slice(2).join('/');
+                            baseOutputPath = `/mnt/${share}/${subPath}`;
+                        }
+                    }
                 }
                 const basePath = path.join(path.resolve(baseOutputPath), filial.pasta);
                 const finalPath = path.join(basePath, `${period.label}.csv`);
