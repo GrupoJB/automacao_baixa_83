@@ -298,7 +298,14 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
 
                 // --- VERIFICAÇÃO INTELIGENTE DE HISTÓRICO ---
                 const baseOutputPath = process.env.BASE_OUTPUT_PATH || './downloads';
-                const finalPath = path.join(baseOutputPath, filial.pasta, `${period.label}.csv`);
+                
+                // No Linux, path.join colapsa // em /. Precisamos manter // para o SMB.
+                const isSmb = baseOutputPath.startsWith('//') || baseOutputPath.startsWith('\\\\');
+                const sep = isSmb ? (baseOutputPath.includes('\\') ? '\\' : '/') : path.sep;
+                
+                const finalPath = isSmb 
+                    ? `${baseOutputPath}${sep}${filial.pasta}${sep}${period.label}.csv`
+                    : path.join(baseOutputPath, filial.pasta, `${period.label}.csv`);
 
                 if (await storage.exists(finalPath)) {
                     const mtime = await storage.getMTime(finalPath);
@@ -412,8 +419,12 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
                 console.log('📡 Evento de download recebido.');
 
                 // Usar a lógica de storage unificada
-                console.log(`📁 Criando diretório: ${path.dirname(finalPath)}`);
-                await storage.mkdir(path.dirname(finalPath));
+                const parentDir = isSmb 
+                    ? `${baseOutputPath}${sep}${filial.pasta}`
+                    : path.dirname(finalPath);
+
+                console.log(`📁 Criando diretório: ${parentDir}`);
+                await storage.mkdir(parentDir);
                 console.log(`💾 Salvando arquivo em: ${finalPath}`);
                 await storage.save(download, finalPath);
                 console.log(`✅ Concluído: ${finalPath}`);
