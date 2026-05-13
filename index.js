@@ -51,8 +51,6 @@ function getSmbClient(share) {
     smbClient.mkdirP = util.promisify(smbClient.mkdir);
     smbClient.writeFileP = util.promisify(smbClient.writeFile);
     smbClient.unlinkP = util.promisify(smbClient.unlink);
-    smbClient.statP = util.promisify(smbClient.stat);
-    smbClient.readdirP = util.promisify(smbClient.readdir);
     
     return smbClient;
 }
@@ -82,9 +80,9 @@ const storage = {
     async getMTime(p) {
         const info = parsePath(p);
         if (info.isSmb) {
-            const client = getSmbClient(info.share);
-            const stats = await client.statP(info.relativePath).catch(() => null);
-            return stats ? new Date(stats.mtime || stats.lastModificationTime) : null;
+            // A biblioteca SMB2 não tem um 'stat' confiável em todas as versões.
+            // Retornaremos nulo para forçar o download apenas se o arquivo NÃO existir.
+            return null;
         }
         const stats = fs.statSync(p);
         return stats.mtime;
