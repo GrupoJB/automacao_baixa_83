@@ -5,6 +5,7 @@ const fs = require('fs');
 const readline = require('readline');
 const SMB2 = require('smb2');
 const util = require('util');
+const { execSync } = require('child_process');
 require('dotenv').config();
 
 chromium.use(stealth);
@@ -90,6 +91,26 @@ const storage = {
     async mkdir(p) {
         const info = parsePath(p);
         if (info.isSmb) {
+            if (process.platform === 'linux') {
+                console.log(`📂 Criando pastas via smbclient: ${info.relativePath}`);
+                const smbPath = info.share.replace(/\\/g, '/');
+                const relPath = info.relativePath.replace(/\\/g, '/');
+                const creds = `${process.env.SMB_DOMAIN}/${process.env.SMB_USER}%${process.env.SMB_PASS}`;
+                
+                // Cria pastas nível por nível usando smbclient
+                const parts = relPath.split('/').filter(Boolean);
+                let current = '';
+                for (const part of parts) {
+                    current = current ? `${current}/${part}` : part;
+                    try {
+                        execSync(`smbclient ${smbPath} -U '${creds}' -c 'mkdir "${current}"' 2>/dev/null`);
+                    } catch (e) {
+                        // Pasta provavelmente já existe, ignoramos o erro
+                    }
+                }
+                return;
+            }
+
             console.log(`📂 Verificando/Criando pastas no SMB: ${info.relativePath}`);
             const client = getSmbClient(info.share);
             const parts = info.relativePath.split(/[\\/]/);
@@ -120,7 +141,24 @@ const storage = {
         console.log(`✅ Download concluído localmente (${(fs.statSync(tempPath).size / 1024).toFixed(1)} KB).`);
 
         if (info.isSmb) {
-            console.log(`📤 Enviando para o servidor de rede...`);
+            if (process.platform === 'linux') {
+                console.log(`📤 Enviando via smbclient...`);
+                const smbPath = info.share.replace(/\\/g, '/');
+                const relPath = info.relativePath.replace(/\\/g, '/');
+                const creds = `${process.env.SMB_DOMAIN}/${process.env.SMB_USER}%${process.env.SMB_PASS}`;
+                
+                try {
+                    execSync(`smbclient ${smbPath} -U '${creds}' -c 'put "${tempPath}" "${relPath}"'`);
+                    console.log(`✨ Arquivo enviado com sucesso via smbclient!`);
+                    fs.unlinkSync(tempPath);
+                } catch (err) {
+                    console.error(`❌ ERRO NO SMBCLIENT:`, err.message);
+                    throw err;
+                }
+                return;
+            }
+
+            console.log(`📤 Enviando para o servidor de rede (SMB2)...`);
             const client = getSmbClient(info.share);
             try {
                 const content = fs.readFileSync(tempPath);
