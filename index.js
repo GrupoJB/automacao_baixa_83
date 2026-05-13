@@ -40,6 +40,7 @@ let smbClient = null;
 
 function getSmbClient(share) {
     if (smbClient) return smbClient;
+    console.log(`\n☁️ Conectando ao servidor SMB: ${share}...`);
     smbClient = new SMB2({
         share: share,
         domain: process.env.SMB_DOMAIN,
@@ -51,6 +52,8 @@ function getSmbClient(share) {
     smbClient.writeFileP = util.promisify(smbClient.writeFile);
     smbClient.unlinkP = util.promisify(smbClient.unlink);
     smbClient.statP = util.promisify(smbClient.stat);
+    smbClient.readdirP = util.promisify(smbClient.readdir);
+    
     return smbClient;
 }
 
@@ -89,13 +92,20 @@ const storage = {
     async mkdir(p) {
         const info = parsePath(p);
         if (info.isSmb) {
+            console.log(`📂 Verificando/Criando pastas no SMB: ${info.relativePath}`);
             const client = getSmbClient(info.share);
             const parts = info.relativePath.split(/[\\/]/);
             let current = '';
             for (const part of parts) {
                 current = current ? path.join(current, part) : part;
                 const exists = await client.existsP(current).catch(() => false);
-                if (!exists) await client.mkdirP(current).catch(() => { });
+                if (!exists) {
+                    console.log(`   + Criando pasta: ${current}`);
+                    await client.mkdirP(current).catch(err => {
+                        console.error(`❌ Erro ao criar pasta no SMB (${current}):`, err.message);
+                        throw err;
+                    });
+                }
             }
             return;
         }
@@ -103,18 +113,26 @@ const storage = {
     },
     async save(download, p) {
         const info = parsePath(p);
-        // Download temporário local (obrigatório para Playwright)
+        console.log(`⏳ Baixando arquivo temporário...`);
         const tempDir = path.join(process.cwd(), 'downloads');
         if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
         const tempPath = path.join(tempDir, `temp_${Date.now()}_${path.basename(p)}`);
         
         await download.saveAs(tempPath);
+        console.log(`✅ Download concluído localmente (${(fs.statSync(tempPath).size / 1024).toFixed(1)} KB).`);
 
         if (info.isSmb) {
+            console.log(`📤 Enviando para o servidor de rede...`);
             const client = getSmbClient(info.share);
-            const content = fs.readFileSync(tempPath);
-            await client.writeFileP(info.relativePath, content);
-            fs.unlinkSync(tempPath);
+            try {
+                const content = fs.readFileSync(tempPath);
+                await client.writeFileP(info.relativePath, content);
+                console.log(`✨ Arquivo gravado com sucesso no SMB!`);
+                fs.unlinkSync(tempPath);
+            } catch (err) {
+                console.error(`❌ ERRO DE ESCRITA NO SMB:`, err.message);
+                throw err;
+            }
         } else {
             if (fs.existsSync(p)) fs.unlinkSync(p);
             fs.renameSync(tempPath, p);
@@ -359,15 +377,29 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
                 console.log('Iniciando download...');
                 await page.waitForTimeout(3000);
                 const downloadBtn = page.locator('button').filter({ hasText: /^Download de Arquivo CSV - separado por ','$/ }).first();
-                await downloadBtn.scrollIntoViewIfNeeded();
-                await downloadBtn.waitFor({ state: 'visible', timeout: 30000 });
-
+                
+                try {
+                    await downloadBtn.scrollIntoViewIfNeeded();
+                    await downloadBtn.waitFor({ state: 'visible', timeout: 30000 });
+                } catch (e) {
+                    console.log('⚠️ Botão de download não apareceu. Verificando se há dados...');
+                    const noData = await page.locator('text=/nenhum registro encontrado/i').isVisible().catch(() => false);
+                    if (noData) {
+                        console.log('ℹ️ Nenhum dado encontrado para esta filial/período.');
+                        continue;
+                    }
+                    throw new Error('Botão de download não encontrado após consulta.');
+                }
+                
                 const downloadPromise = page.waitForEvent('download', { timeout: 180000 });
                 await downloadBtn.evaluate(el => el.click());
                 const download = await downloadPromise;
+                console.log('📡 Evento de download recebido.');
 
                 // Usar a lógica de storage unificada
+                console.log(`📁 Criando diretório: ${path.dirname(finalPath)}`);
                 await storage.mkdir(path.dirname(finalPath));
+                console.log(`💾 Salvando arquivo em: ${finalPath}`);
                 await storage.save(download, finalPath);
                 console.log(`✅ Concluído: ${finalPath}`);
             }
