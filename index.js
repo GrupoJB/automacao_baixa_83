@@ -248,7 +248,6 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
     }
 
     const currentUser = USERS[userIndex];
-    const stateFile = `state_${currentUser.email.split('@')[0]}.json`;
 
     console.log(`\n================================================`);
     console.log(`USUÁRIO: ${currentUser.email}`);
