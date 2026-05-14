@@ -474,7 +474,9 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
         }
 
         console.log('\n🏁 TODAS AS FILIAIS E PERÍODOS CONCLUÍDOS!');
-        rl.close();
+        await browser.close();
+        if (rl) rl.close();
+        process.exit(0); // Força a saída com sucesso
 
     } catch (error) {
         if (error.message === 'LIMITE_ATINGIDO') {
