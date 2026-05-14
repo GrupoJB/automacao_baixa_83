@@ -347,17 +347,30 @@ async function run(userIndex, cdIndex, periodIdx, selectedPeriods) {
                 // Configurar Filial (Com Retry para lentidão)
                 async function selectFilial(retries = 2) {
                     try {
-                        const unitTrigger = page.locator('div[id*="unidade"] .ui-selectonemenu-trigger');
-                        await unitTrigger.waitFor({ state: 'visible', timeout: 120000 });
+                        console.log(`   + Aguardando seletor de unidade...`);
+                        // Espera qualquer bloqueio de tela (loading) sumir
+                        await page.waitForSelector('.ui-blockui, .ui-widget-overlay', { state: 'hidden', timeout: 60000 }).catch(() => {});
+                        
+                        const unitTrigger = page.locator('div[id*="unidade"], .ui-selectonemenu').filter({ hasText: /Unidade/i }).locator('.ui-selectonemenu-trigger').first();
+                        
+                        // Tenta esperar o elemento, se falhar, tenta um seletor alternativo
+                        try {
+                            await unitTrigger.waitFor({ state: 'visible', timeout: 60000 });
+                        } catch (e) {
+                            console.log('   + Seletor primário falhou, tentando seletor secundário...');
+                            await page.locator('.ui-selectonemenu-trigger').first().waitFor({ state: 'visible', timeout: 30000 });
+                        }
+
                         await unitTrigger.click();
                         await page.waitForTimeout(2000);
                         await page.locator('.ui-selectonemenu-panel:visible li').filter({ hasText: new RegExp(`^${filial.nome}`, 'i') }).click();
                         await page.waitForTimeout(3000);
                     } catch (e) {
                         if (retries > 0) {
-                            console.log(`⚠️ Lentidão na filial ${filial.nome}. Tentando novamente...`);
+                            console.log(`⚠️ Lentidão extrema na filial ${filial.nome}. Forçando recarregamento da página (F5)...`);
                             await page.reload({ waitUntil: 'networkidle' });
-                            await setupFilters(false); // Garante que os filtros 14/83 ainda estão lá
+                            await page.waitForTimeout(5000);
+                            await setupFilters(false); 
                             return selectFilial(retries - 1);
                         }
                         throw e;
