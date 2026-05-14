@@ -58,12 +58,15 @@ function cleanupSmbFiles() {
 
 chromium.use(stealth);
 
-// --- CONFIGURAÇÃO DE USUÁRIOS ---
-const USERS = [
+// --- CONFIGURAÇÃO DE USUÁRIOS (Sem duplicados) ---
+const USERS_RAW = [
     { email: process.env.MYTRACKING_USER, pass: process.env.MYTRACKING_PASS },
     { email: 'victor.silva@transcleber.com.br', pass: 'Jbt@2024' },
     { email: 'gabriel.silva@transcleber.com.br', pass: 'Jbt@2024' }
 ];
+const USERS = Array.from(new Set(USERS_RAW.map(u => u.email)))
+    .map(email => USERS_RAW.find(u => u.email === email))
+    .filter(u => u.email && u.pass);
 
 // --- CONFIGURAÇÃO DE FILIAIS ---
 const FILIAIS = [
@@ -341,11 +344,26 @@ async function run(userIndex, cdIndex, periodIdx, selectedPeriods) {
 
                 console.log(`\n>>> [${period.label}] Filial: ${filial.nome}`);
 
-                // Configurar Filial
-                await page.locator('div[id*="unidade"] .ui-selectonemenu-trigger').click();
-                await page.waitForTimeout(1000);
-                await page.locator('.ui-selectonemenu-panel:visible li').filter({ hasText: new RegExp(`^${filial.nome}`, 'i') }).click();
-                await page.waitForTimeout(1500);
+                // Configurar Filial (Com Retry para lentidão)
+                async function selectFilial(retries = 2) {
+                    try {
+                        const unitTrigger = page.locator('div[id*="unidade"] .ui-selectonemenu-trigger');
+                        await unitTrigger.waitFor({ state: 'visible', timeout: 30000 });
+                        await unitTrigger.click();
+                        await page.waitForTimeout(1500);
+                        await page.locator('.ui-selectonemenu-panel:visible li').filter({ hasText: new RegExp(`^${filial.nome}`, 'i') }).click();
+                        await page.waitForTimeout(2000);
+                    } catch (e) {
+                        if (retries > 0) {
+                            console.log(`⚠️ Lentidão na filial ${filial.nome}. Tentando novamente...`);
+                            await page.reload({ waitUntil: 'networkidle' });
+                            await setupFilters(false); // Garante que os filtros 14/83 ainda estão lá
+                            return selectFilial(retries - 1);
+                        }
+                        throw e;
+                    }
+                }
+                await selectFilial();
 
                 // Configurar Datas
                 console.log(`Configurando datas (${period.label})...`);
