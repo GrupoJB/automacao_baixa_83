@@ -26,10 +26,34 @@ function cleanupTempFiles() {
                 } catch (e) { }
             }
         });
-        if (count > 0) console.log(`🧹 Limpeza inicial: ${count} arquivos temporários removidos.`);
+        if (count > 0) console.log(`🧹 Limpeza local: ${count} arquivos temporários removidos.`);
     } catch (e) {
-        console.error('⚠️ Erro na limpeza inicial:', e.message);
+        console.error('⚠️ Erro na limpeza inicial local:', e.message);
     }
+}
+
+// Função para limpar arquivos temporários perdidos na rede (SMB)
+function cleanupSmbFiles() {
+    if (process.platform !== 'linux') return;
+    
+    console.log('🧹 Iniciando limpeza de arquivos temporários na REDE (SMB)...');
+    const baseOutputPath = process.env.BASE_OUTPUT_PATH;
+    const creds = `${process.env.SMB_DOMAIN}/${process.env.SMB_USER}%${process.env.SMB_PASS}`;
+
+    for (const filial of FILIAIS) {
+        try {
+            const info = parsePath(path.join(baseOutputPath, filial.pasta));
+            if (info.isSmb) {
+                const smbPath = info.share.replace(/\\/g, '/');
+                const relPath = info.relativePath.replace(/\\/g, '/');
+                // Executa mdel para apagar todos os arquivos temp_*.csv na pasta da filial
+                execSync(`smbclient ${smbPath} -U '${creds}' -c 'cd "${relPath}"; prompt; mdel temp_*.csv' 2>/dev/null`);
+            }
+        } catch (e) {
+            // Silencioso se não houver arquivos ou erro de pasta
+        }
+    }
+    console.log('✨ Faxina na rede concluída.');
 }
 
 chromium.use(stealth);
@@ -400,6 +424,7 @@ async function run(userIndex, cdIndex, periodIdx, selectedPeriods) {
 
 async function start() {
     cleanupTempFiles();
+    cleanupSmbFiles();
     console.log('\n======================================');
     console.log('   MYTRACKING AUTOMATION - BASE 83');
     console.log('======================================');
