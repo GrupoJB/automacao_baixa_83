@@ -13,16 +13,20 @@ load_dotenv()
 # ============ LIMPEZA DE TEMPORÁRIOS ============
 
 def limpar_temporarios_antigos():
-    """Remove pastas temporárias de execuções anteriores para evitar duplicidade de dados."""
+    """Remove pastas e arquivos temporários de execuções anteriores para evitar duplicidade de dados."""
     if os.name == 'posix':
         temp_root = tempfile.gettempdir()
         print(f"🔍 Verificando temporários antigos em {temp_root}...")
         for item in os.listdir(temp_root):
-            if item.startswith("smb_base_83_"):
+            # Limpa pastas do smbclient e arquivos soltos do robô Node
+            if item.startswith("smb_base_83_") or (item.startswith("temp_") and item.endswith(".csv")):
                 path = os.path.join(temp_root, item)
                 try:
-                    shutil.rmtree(path)
-                    print(f"🧹 Pasta temporária antiga removida: {item}")
+                    if os.path.isdir(path):
+                        shutil.rmtree(path)
+                    else:
+                        os.remove(path)
+                    print(f"🧹 Temporário removido: {item}")
                 except Exception as e:
                     print(f"⚠️ Não foi possível remover {item}: {e}")
 
