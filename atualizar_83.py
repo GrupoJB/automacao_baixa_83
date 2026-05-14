@@ -13,6 +13,25 @@ from dotenv import load_dotenv
 # Carregar variáveis de ambiente do .env
 load_dotenv()
 
+# ============ LIMPEZA DE TEMPORÁRIOS ============
+
+def limpar_temporarios_antigos():
+    """Remove pastas temporárias de execuções anteriores para evitar duplicidade de dados."""
+    if os.name == 'posix':
+        temp_root = tempfile.gettempdir()
+        print(f"🔍 Verificando temporários antigos em {temp_root}...")
+        for item in os.listdir(temp_root):
+            if item.startswith("smb_base_83_"):
+                path = os.path.join(temp_root, item)
+                try:
+                    shutil.rmtree(path)
+                    print(f"🧹 Pasta temporária antiga removida: {item}")
+                except Exception as e:
+                    print(f"⚠️ Não foi possível remover {item}: {e}")
+
+# Executa a limpeza antes de qualquer outra coisa
+limpar_temporarios_antigos()
+
 # ============ FUNÇÕES UTIL ============
 
 def limpar_nome_coluna(col: str) -> str:
@@ -267,4 +286,7 @@ try:
 finally:
     cursor.close()
     conn.close()
+    if temp_dir_smb and os.path.exists(temp_dir_smb):
+        print(f"🧹 Limpando pasta de trabalho atual: {temp_dir_smb}...")
+        shutil.rmtree(temp_dir_smb)
     print("Conexão encerrada.")
