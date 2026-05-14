@@ -9,6 +9,9 @@ const os = require('os');
 const { execSync } = require('child_process');
 require('dotenv').config();
 
+// Aumenta o limite de ouvintes para evitar avisos do SMB2
+process.setMaxListeners(30);
+
 chromium.use(stealth);
 
 // --- CONFIGURAÇÃO DE USUÁRIOS ---
@@ -303,14 +306,33 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
 
         // Configuração de Relatório (Uma vez por login)
         console.log('Configurando filtros iniciais...');
-        await page.locator('div[id="form:grupo"] .ui-selectonemenu-trigger').click();
-        await page.waitForTimeout(1000);
-        await page.locator('.ui-selectonemenu-panel:visible li').filter({ hasText: /^14 -/ }).click();
-        await page.waitForTimeout(2000);
-        await page.locator('div[id*="relatorio"] .ui-selectonemenu-trigger, .ui-selectonemenu:not(.ui-state-disabled)').last().click();
-        await page.waitForTimeout(1000);
-        await page.locator('.ui-selectonemenu-panel:visible li').filter({ hasText: /^83 -/ }).click();
-        await page.waitForTimeout(3000);
+        
+        async function setupFilters(retry = true) {
+            try {
+                const groupTrigger = page.locator('div[id="form:grupo"] .ui-selectonemenu-trigger');
+                await groupTrigger.waitFor({ state: 'visible', timeout: 15000 });
+                await groupTrigger.click();
+                await page.waitForTimeout(1000);
+                await page.locator('.ui-selectonemenu-panel:visible li').filter({ hasText: /^14 -/ }).click();
+                
+                await page.waitForTimeout(2000);
+                const reportTrigger = page.locator('div[id*="relatorio"] .ui-selectonemenu-trigger, .ui-selectonemenu:not(.ui-state-disabled)').last();
+                await reportTrigger.waitFor({ state: 'visible', timeout: 10000 });
+                await reportTrigger.click();
+                await page.waitForTimeout(1000);
+                await page.locator('.ui-selectonemenu-panel:visible li').filter({ hasText: /^83 -/ }).click();
+                await page.waitForTimeout(3000);
+            } catch (e) {
+                if (retry) {
+                    console.log('⚠️ Falha ao configurar filtros. Tentando recarregar a página...');
+                    await page.reload({ waitUntil: 'networkidle' });
+                    return setupFilters(false);
+                }
+                throw e;
+            }
+        }
+        
+        await setupFilters();
 
         for (let j = periodIdx; j < selectedPeriods.length; j++) {
             const period = selectedPeriods[j];
@@ -493,6 +515,9 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
             console.log('🔄 Tentando recuperar com próximo usuário...');
             return run(userIndex + 1, cdIndex, periodIdx, selectedPeriods);
         }
+        
+        console.error('❌ Falha fatal: Todos os usuários tentados ou erro irrecuperável.');
+        process.exit(1); 
     } finally {
         await browser.close().catch(() => { });
     }
