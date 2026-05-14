@@ -4,6 +4,7 @@ import pandas as pd
 import subprocess
 import tempfile
 import shutil
+import getpass
 from colorama import Fore, Style, init
 from dotenv import load_dotenv
 
@@ -16,10 +17,13 @@ def limpar_temporarios_antigos():
     """Remove pastas e arquivos temporários de execuções anteriores para evitar duplicidade de dados."""
     if os.name == 'posix':
         temp_root = tempfile.gettempdir()
-        print(f"🔍 Verificando temporários antigos em {temp_root}...")
+        current_user = getpass.getuser()
+        user_prefix = f"smb_base_83_{current_user}_"
+        
+        print(f"🔍 Verificando temporários de '{current_user}' em {temp_root}...")
         for item in os.listdir(temp_root):
-            # Limpa pastas do smbclient e arquivos soltos do robô Node
-            if item.startswith("smb_base_83_") or (item.startswith("temp_") and item.endswith(".csv")):
+            # Limpa apenas o que pertence ao usuário atual ou arquivos temp_ do robô
+            if item.startswith(user_prefix) or (item.startswith("temp_") and item.endswith(".csv")):
                 path = os.path.join(temp_root, item)
                 try:
                     if os.path.isdir(path):
@@ -27,8 +31,8 @@ def limpar_temporarios_antigos():
                     else:
                         os.remove(path)
                     print(f"🧹 Temporário removido: {item}")
-                except Exception as e:
-                    print(f"⚠️ Não foi possível remover {item}: {e}")
+                except:
+                    pass # Silencia erros de permissão se o arquivo for de outro processo
 
 # Executa a limpeza antes de qualquer outra coisa
 limpar_temporarios_antigos()
@@ -53,7 +57,8 @@ def get_base_path():
             relative_path = '/'.join(parts[2:])
             creds = f"{os.getenv('SMB_DOMAIN')}/{os.getenv('SMB_USER')}%{os.getenv('SMB_PASS')}"
             
-            temp_dir_smb = tempfile.mkdtemp(prefix="smb_base_83_")
+            user_prefix = f"smb_base_83_{getpass.getuser()}_"
+            temp_dir_smb = tempfile.mkdtemp(prefix=user_prefix)
             print(f"📡 Modo Linux: Baixando arquivos do SMB para {temp_dir_smb}...")
             
             # Comando para baixar tudo recursivamente
