@@ -306,18 +306,18 @@ async function run(userIndex, cdIndex, periodIdx, selectedPeriods) {
         async function setupFilters(retry = true) {
             try {
                 const groupTrigger = page.locator('div[id="form:grupo"] .ui-selectonemenu-trigger');
-                await groupTrigger.waitFor({ state: 'visible', timeout: 15000 });
+                await groupTrigger.waitFor({ state: 'visible', timeout: 120000 });
                 await groupTrigger.click();
-                await page.waitForTimeout(1000);
+                await page.waitForTimeout(2000);
                 await page.locator('.ui-selectonemenu-panel:visible li').filter({ hasText: /^14 -/ }).click();
                 
-                await page.waitForTimeout(2000);
-                const reportTrigger = page.locator('div[id*="relatorio"] .ui-selectonemenu-trigger, .ui-selectonemenu:not(.ui-state-disabled)').last();
-                await reportTrigger.waitFor({ state: 'visible', timeout: 10000 });
-                await reportTrigger.click();
-                await page.waitForTimeout(1000);
-                await page.locator('.ui-selectonemenu-panel:visible li').filter({ hasText: /^83 -/ }).click();
                 await page.waitForTimeout(3000);
+                const reportTrigger = page.locator('div[id*="relatorio"] .ui-selectonemenu-trigger, .ui-selectonemenu:not(.ui-state-disabled)').last();
+                await reportTrigger.waitFor({ state: 'visible', timeout: 120000 });
+                await reportTrigger.click();
+                await page.waitForTimeout(2000);
+                await page.locator('.ui-selectonemenu-panel:visible li').filter({ hasText: /^83 -/ }).click();
+                await page.waitForTimeout(5000);
             } catch (e) {
                 if (retry) {
                     console.log('⚠️ Falha ao configurar filtros. Tentando recarregar a página...');
@@ -348,11 +348,11 @@ async function run(userIndex, cdIndex, periodIdx, selectedPeriods) {
                 async function selectFilial(retries = 2) {
                     try {
                         const unitTrigger = page.locator('div[id*="unidade"] .ui-selectonemenu-trigger');
-                        await unitTrigger.waitFor({ state: 'visible', timeout: 30000 });
+                        await unitTrigger.waitFor({ state: 'visible', timeout: 120000 });
                         await unitTrigger.click();
-                        await page.waitForTimeout(1500);
-                        await page.locator('.ui-selectonemenu-panel:visible li').filter({ hasText: new RegExp(`^${filial.nome}`, 'i') }).click();
                         await page.waitForTimeout(2000);
+                        await page.locator('.ui-selectonemenu-panel:visible li').filter({ hasText: new RegExp(`^${filial.nome}`, 'i') }).click();
+                        await page.waitForTimeout(3000);
                     } catch (e) {
                         if (retries > 0) {
                             console.log(`⚠️ Lentidão na filial ${filial.nome}. Tentando novamente...`);
@@ -385,9 +385,9 @@ async function run(userIndex, cdIndex, periodIdx, selectedPeriods) {
                     const results = page.locator('.ui-datatable-data tr').first();
                     
                     const result = await Promise.race([
-                        results.waitFor({ state: 'visible', timeout: 60000 }).then(() => 'ok'),
-                        limitMsg.waitFor({ state: 'visible', timeout: 60000 }).then(() => 'limit'),
-                        page.waitForTimeout(65000).then(() => 'timeout')
+                        results.waitFor({ state: 'visible', timeout: 120000 }).then(() => 'ok'),
+                        limitMsg.waitFor({ state: 'visible', timeout: 120000 }).then(() => 'limit'),
+                        page.waitForTimeout(125000).then(() => 'timeout')
                     ]);
 
                     if (result === 'limit') {
