@@ -13,9 +13,9 @@ chromium.use(stealth);
 
 // --- CONFIGURAÇÃO DE USUÁRIOS ---
 const USERS = [
+    { email: 'gabriel.silva@transcleber.com.br', pass: 'Gabr2312!*' },
     { email: 'luhan.vinicius@transcleber.com.br', pass: 'Luhan123@@' },
-    { email: 'victor.silva@transcleber.com.br', pass: 'Victor18@' },
-    { email: 'gabriel.silva@transcleber.com.br', pass: 'Gabr2312!*' }
+    { email: 'victor.silva@transcleber.com.br', pass: 'Victor18@' }
 ];
 
 // --- CONFIGURAÇÃO DE FILIAIS ---
@@ -298,7 +298,11 @@ async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = 
 
             await page.waitForURL(url => url.toString().includes('private'), { timeout: 30000 });
             await page.goto(process.env.REPORT_URL, { waitUntil: 'networkidle' });
-            await context.storageState({ path: stateFile });
+            try {
+                await context.storageState({ path: stateFile });
+            } catch (e) {
+                console.log(`⚠️ Aviso: Não foi possível salvar o arquivo de sessão (${stateFile}). O robô continuará sem cache.`);
+            }
         }
 
         // Configuração de Relatório (Uma vez por login)
