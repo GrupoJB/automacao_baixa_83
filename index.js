@@ -1,7 +1,7 @@
 const { chromium } = require('playwright-extra');
 const stealth = require('puppeteer-extra-plugin-stealth')();
-const fs = require('fs');
 const path = require('path');
+const fs = require('fs');
 const readline = require('readline');
 const SMB2 = require('smb2');
 const util = require('util');
@@ -9,64 +9,14 @@ const os = require('os');
 const { execSync } = require('child_process');
 require('dotenv').config();
 
-// Aumenta o limite de ouvintes para evitar avisos do SMB2
-process.setMaxListeners(30);
-
-// Função para limpar arquivos temporários de execuções anteriores
-function cleanupTempFiles() {
-    try {
-        const tmpDir = os.tmpdir();
-        const files = fs.readdirSync(tmpDir);
-        let count = 0;
-        files.forEach(file => {
-            if (file.startsWith('temp_') || file.startsWith('state_') || file.startsWith('playwright_state_')) {
-                try {
-                    fs.unlinkSync(path.join(tmpDir, file));
-                    count++;
-                } catch (e) { }
-            }
-        });
-        if (count > 0) console.log(`🧹 Limpeza local: ${count} arquivos temporários removidos.`);
-    } catch (e) {
-        console.error('⚠️ Erro na limpeza inicial local:', e.message);
-    }
-}
-
-// Função para limpar arquivos temporários perdidos na rede (SMB)
-function cleanupSmbFiles() {
-    if (process.platform !== 'linux') return;
-    
-    console.log('🧹 Iniciando limpeza de arquivos temporários na REDE (SMB)...');
-    const baseOutputPath = process.env.BASE_OUTPUT_PATH;
-    const creds = `${process.env.SMB_DOMAIN}/${process.env.SMB_USER}%${process.env.SMB_PASS}`;
-
-    for (const filial of FILIAIS) {
-        try {
-            const info = parsePath(path.join(baseOutputPath, filial.pasta));
-            if (info.isSmb) {
-                const smbPath = info.share.replace(/\\/g, '/');
-                const relPath = info.relativePath.replace(/\\/g, '/');
-                // Executa mdel para apagar todos os arquivos temp_*.csv na pasta da filial
-                execSync(`smbclient ${smbPath} -U '${creds}' -c 'cd "${relPath}"; prompt; mdel temp_*.csv' 2>/dev/null`);
-            }
-        } catch (e) {
-            // Silencioso se não houver arquivos ou erro de pasta
-        }
-    }
-    console.log('✨ Faxina na rede concluída.');
-}
-
 chromium.use(stealth);
 
-// --- CONFIGURAÇÃO DE USUÁRIOS (Sem duplicados) ---
-const USERS_RAW = [
-    { email: process.env.MYTRACKING_USER, pass: process.env.MYTRACKING_PASS },
-    { email: 'victor.silva@transcleber.com.br', pass: 'Jbt@2024' },
-    { email: 'gabriel.silva@transcleber.com.br', pass: 'Jbt@2024' }
+// --- CONFIGURAÇÃO DE USUÁRIOS ---
+const USERS = [
+    { email: 'luhan.vinicius@transcleber.com.br', pass: 'Luhan123@@' },
+    { email: 'victor.silva@transcleber.com.br', pass: 'Victor18@' },
+    { email: 'gabriel.silva@transcleber.com.br', pass: 'Gabr2312!*' }
 ];
-const USERS = Array.from(new Set(USERS_RAW.map(u => u.email)))
-    .map(email => USERS_RAW.find(u => u.email === email))
-    .filter(u => u.email && u.pass);
 
 // --- CONFIGURAÇÃO DE FILIAIS ---
 const FILIAIS = [
@@ -109,37 +59,61 @@ function getSmbClient(share) {
     smbClient.existsP = util.promisify(smbClient.exists);
     smbClient.mkdirP = util.promisify(smbClient.mkdir);
     smbClient.writeFileP = util.promisify(smbClient.writeFile);
+    smbClient.unlinkP = util.promisify(smbClient.unlink);
+    
     return smbClient;
 }
 
-function parsePath(p) {
-    const isSmb = p.startsWith('//') || p.startsWith('\\\\');
-    if (!isSmb) return { isSmb: false, fullPath: p };
-    
-    const parts = p.replace(/\\/g, '/').split('/').filter(x => x);
-    return {
-        isSmb: true,
-        share: `//${parts[0]}/${parts[1]}`,
-        relativePath: parts.slice(2).join('\\'),
-        filename: parts[parts.length - 1]
-    };
+function parsePath(fullPath) {
+    const isSmb = fullPath.startsWith('//') || fullPath.startsWith('\\\\');
+    if (!isSmb) return { isSmb: false, path: fullPath };
+
+    const parts = fullPath.split(/[\\/]/).filter(Boolean);
+    const host = parts[0];
+    const shareName = parts[1];
+    const share = `\\\\${host}\\${shareName}`;
+    const relativePath = parts.slice(2).join('\\');
+
+    return { isSmb: true, share, relativePath };
 }
 
 const storage = {
+    async exists(p) {
+        const info = parsePath(p);
+        if (info.isSmb) {
+            const client = getSmbClient(info.share);
+            return await client.existsP(info.relativePath).catch(() => false);
+        }
+        return fs.existsSync(p);
+    },
+    async getMTime(p) {
+        const info = parsePath(p);
+        if (info.isSmb) {
+            // A biblioteca SMB2 não tem um 'stat' confiável em todas as versões.
+            // Retornaremos nulo para forçar o download apenas se o arquivo NÃO existir.
+            return null;
+        }
+        const stats = fs.statSync(p);
+        return stats.mtime;
+    },
     async mkdir(p) {
         const info = parsePath(p);
         if (info.isSmb) {
             if (process.platform === 'linux') {
-                const creds = `${process.env.SMB_DOMAIN}/${process.env.SMB_USER}%${process.env.SMB_PASS}`;
+                console.log(`📂 Criando pastas via smbclient: ${info.relativePath}`);
                 const smbPath = info.share.replace(/\\/g, '/');
-                const parts = info.relativePath.split(/[\\/]/);
+                const relPath = info.relativePath.replace(/\\/g, '/');
+                const creds = `${process.env.SMB_DOMAIN}/${process.env.SMB_USER}%${process.env.SMB_PASS}`;
+                
+                // Cria pastas nível por nível usando smbclient
+                const parts = relPath.split('/').filter(Boolean);
                 let current = '';
                 for (const part of parts) {
-                    current = current ? current + '\\' + part : part;
+                    current = current ? `${current}/${part}` : part;
                     try {
                         execSync(`smbclient ${smbPath} -U '${creds}' -c 'mkdir "${current}"' 2>/dev/null`);
                     } catch (e) {
-                        // Provavelmente pasta já existe
+                        // Pasta provavelmente já existe, ignoramos o erro
                     }
                 }
                 return;
@@ -168,93 +142,120 @@ const storage = {
         const info = parsePath(p);
         console.log(`⏳ Baixando arquivo temporário...`);
         
-        const targetFilename = path.basename(p);
-        const tempPath = path.join(os.tmpdir(), `temp_${Date.now()}_${targetFilename}`);
+        // Usar a pasta temporária do sistema para evitar erros de permissão EACCES
+        const tempPath = path.join(os.tmpdir(), `temp_${Date.now()}_${path.basename(p)}`);
         
-        try {
-            await download.saveAs(tempPath);
-            console.log(`✅ Download concluído localmente (${(fs.statSync(tempPath).size / 1024).toFixed(1)} KB).`);
+        await download.saveAs(tempPath);
+        console.log(`✅ Download concluído localmente (${(fs.statSync(tempPath).size / 1024).toFixed(1)} KB).`);
 
-            if (info.isSmb) {
-                if (process.platform === 'linux') {
-                    console.log(`📤 Enviando via smbclient...`);
-                    const smbPath = info.share.replace(/\\/g, '/');
-                    const remoteFile = info.relativePath.replace(/\\/g, '/') + '/' + targetFilename;
-                    const creds = `${process.env.SMB_DOMAIN}/${process.env.SMB_USER}%${process.env.SMB_PASS}`;
-                    
-                    execSync(`smbclient ${smbPath} -U '${creds}' -c 'put "${tempPath}" "${remoteFile}"'`);
-                    console.log(`✨ Arquivo enviado com sucesso para a rede!`);
-                } else {
-                    console.log(`📤 Enviando via SMB2 (Windows)...`);
-                    const client = getSmbClient(info.share);
-                    await client.writeFileP(info.relativePath + '\\' + targetFilename, fs.readFileSync(tempPath));
-                    console.log(`✨ Arquivo gravado com sucesso no SMB!`);
+        if (info.isSmb) {
+            if (process.platform === 'linux') {
+                console.log(`📤 Enviando via smbclient...`);
+                const smbPath = info.share.replace(/\\/g, '/');
+                const relPath = info.relativePath.replace(/\\/g, '/');
+                const creds = `${process.env.SMB_DOMAIN}/${process.env.SMB_USER}%${process.env.SMB_PASS}`;
+                
+                try {
+                    execSync(`smbclient ${smbPath} -U '${creds}' -c 'put "${tempPath}" "${relPath}"'`);
+                    console.log(`✨ Arquivo enviado com sucesso via smbclient!`);
+                    fs.unlinkSync(tempPath);
+                } catch (err) {
+                    console.error(`❌ ERRO NO SMBCLIENT:`, err.message);
+                    throw err;
                 }
-            } else {
-                if (fs.existsSync(p)) fs.unlinkSync(p);
-                fs.renameSync(tempPath, p);
+                return;
             }
-        } catch (err) {
-            console.error(`❌ Erro ao salvar arquivo:`, err.message);
-            throw err;
-        } finally {
-            if (fs.existsSync(tempPath)) {
+
+            console.log(`📤 Enviando para o servidor de rede (SMB2)...`);
+            const client = getSmbClient(info.share);
+            try {
+                const content = fs.readFileSync(tempPath);
+                await client.writeFileP(info.relativePath, content);
+                console.log(`✨ Arquivo gravado com sucesso no SMB!`);
                 fs.unlinkSync(tempPath);
-                console.log(`🗑️ Temporário local removido.`);
+            } catch (err) {
+                console.error(`❌ ERRO DE ESCRITA NO SMB:`, err.message);
+                throw err;
             }
+        } else {
+            if (fs.existsSync(p)) fs.unlinkSync(p);
+            fs.renameSync(tempPath, p);
         }
     }
 };
 
-// --- LOGICA DE DATAS ---
 function getPeriods(option) {
-    const hoje = new Date();
+    const now = new Date();
     const periods = [];
 
-    // Mes Atual (26.XX)
-    const curMonth = hoje.getMonth() + 1;
-    const curYear = hoje.getFullYear().toString().slice(-2);
-    const tagCur = `${curYear}.${curMonth.toString().padStart(2, '0')}`;
+    const getMonthInfo = (date) => {
+        const year = String(date.getFullYear()).slice(-2);
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+        return { year, month, lastDay, fullYear: date.getFullYear(), fullMonth: date.getMonth() };
+    };
 
-    // Mes Passado
-    const lastDate = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
-    const lastMonth = lastDate.getMonth() + 1;
-    const lastYear = lastDate.getFullYear().toString().slice(-2);
-    const tagLast = `${lastYear}.${lastMonth.toString().padStart(2, '0')}`;
+    const current = getMonthInfo(now);
+    const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const last = getMonthInfo(lastMonthDate);
 
-    const splitLast = [
-        { label: `${tagLast}.01`, start: '01', end: '15', month: lastMonth, year: lastDate.getFullYear() },
-        { label: `${tagLast}.02`, start: '16', end: '31', month: lastMonth, year: lastDate.getFullYear() }
-    ];
+    // Opção 2 ou 3 (Mês Passado) - Vem primeiro na opção 3
+    if (option === '2' || option === '3') {
+        periods.push({
+            label: `${last.year}.${last.month}.01`,
+            start: 1, end: 15, monthLabel: 'Passado', isLastMonth: true
+        });
+        periods.push({
+            label: `${last.year}.${last.month}.02`,
+            start: 16, end: last.lastDay, monthLabel: 'Passado', isLastMonth: true
+        });
+    }
 
-    const curFull = { label: tagCur, start: '01', end: '31', month: curMonth, year: hoje.getFullYear() };
-
-    if (option === '1') periods.push(curFull);
-    if (option === '2') periods.push(...splitLast);
-    if (option === '3') periods.push(...splitLast, curFull);
+    // Opção 1 ou 3 (Mês Atual)
+    if (option === '1' || option === '3') {
+        if (now.getDate() < 16) {
+            // Se ainda não passou do dia 15, baixa o mês inteiro (ex: 26.05)
+            periods.push({
+                label: `${current.year}.${current.month}`,
+                start: 1, end: now.getDate(), monthLabel: 'Atual'
+            });
+        } else {
+            // Se já passou do dia 15, divide em duas partes
+            periods.push({
+                label: `${current.year}.${current.month}.01`,
+                start: 1, end: 15, monthLabel: 'Atual'
+            });
+            periods.push({
+                label: `${current.year}.${current.month}.02`,
+                start: 16, end: now.getDate(), monthLabel: 'Atual'
+            });
+        }
+    }
 
     return periods;
 }
 
-// --- NAVEGAÇÃO PRINCIPAL ---
-async function run(userIndex, cdIndex, periodIdx, selectedPeriods) {
+async function run(userIndex = 0, cdIndex = 0, periodIdx = 0, selectedPeriods = []) {
     if (userIndex >= USERS.length) {
-        console.error('❌ Todos os usuários atingiram o limite ou falharam.');
-        process.exit(1);
+        console.log('❌ Todos os usuários atingiram o limite de hoje.');
+        rl.close();
+        return;
     }
-
     if (cdIndex >= FILIAIS.length) {
-        console.log('\n🏁 TODAS AS FILIAIS E PERÍODOS CONCLUÍDOS!');
-        process.exit(0);
+        console.log('✅ Todas as filiais e períodos foram processados!');
+        rl.close();
+        return;
     }
 
     const currentUser = USERS[userIndex];
+
     console.log(`\n================================================`);
     console.log(`USUÁRIO: ${currentUser.email}`);
     console.log(`PROCESSO: ${FILIAIS[cdIndex].nome} (${cdIndex + 1}/${FILIAIS.length})`);
     console.log(`================================================\n`);
 
     const isLinux = process.platform === 'linux';
+    // No Linux, o padrão é true (invisível). No Windows, o padrão é false (visível).
     const isHeadless = isLinux ? (process.env.HEADLESS !== 'false') : (process.env.HEADLESS === 'true');
 
     const browser = await chromium.launch({
@@ -302,33 +303,14 @@ async function run(userIndex, cdIndex, periodIdx, selectedPeriods) {
 
         // Configuração de Relatório (Uma vez por login)
         console.log('Configurando filtros iniciais...');
-        
-        async function setupFilters(retry = true) {
-            try {
-                const groupTrigger = page.locator('div[id="form:grupo"] .ui-selectonemenu-trigger');
-                await groupTrigger.waitFor({ state: 'visible', timeout: 120000 });
-                await groupTrigger.click();
-                await page.waitForTimeout(2000);
-                await page.locator('.ui-selectonemenu-panel:visible li').filter({ hasText: /^14 -/ }).click();
-                
-                await page.waitForTimeout(3000);
-                const reportTrigger = page.locator('div[id*="relatorio"] .ui-selectonemenu-trigger, .ui-selectonemenu:not(.ui-state-disabled)').last();
-                await reportTrigger.waitFor({ state: 'visible', timeout: 120000 });
-                await reportTrigger.click();
-                await page.waitForTimeout(2000);
-                await page.locator('.ui-selectonemenu-panel:visible li').filter({ hasText: /^83 -/ }).click();
-                await page.waitForTimeout(5000);
-            } catch (e) {
-                if (retry) {
-                    console.log('⚠️ Falha ao configurar filtros. Tentando recarregar a página...');
-                    await page.reload({ waitUntil: 'networkidle' });
-                    return setupFilters(false);
-                }
-                throw e;
-            }
-        }
-        
-        await setupFilters();
+        await page.locator('div[id="form:grupo"] .ui-selectonemenu-trigger').click();
+        await page.waitForTimeout(1000);
+        await page.locator('.ui-selectonemenu-panel:visible li').filter({ hasText: /^14 -/ }).click();
+        await page.waitForTimeout(2000);
+        await page.locator('div[id*="relatorio"] .ui-selectonemenu-trigger, .ui-selectonemenu:not(.ui-state-disabled)').last().click();
+        await page.waitForTimeout(1000);
+        await page.locator('.ui-selectonemenu-panel:visible li').filter({ hasText: /^83 -/ }).click();
+        await page.waitForTimeout(3000);
 
         for (let j = periodIdx; j < selectedPeriods.length; j++) {
             const period = selectedPeriods[j];
@@ -336,99 +318,165 @@ async function run(userIndex, cdIndex, periodIdx, selectedPeriods) {
             console.log(`INICIANDO PERÍODO: ${period.label}`);
             console.log(`================================================`);
 
-            for (let i = cdIndex; i < FILIAIS.length; i++) {
+            // Recarregar a página para limpar qualquer estado anterior do calendário
+            console.log('Resetando página para novo período...');
+            await page.goto(process.env.REPORT_URL, { waitUntil: 'networkidle' });
+
+            // Re-selecionar o relatório (14 e 83) após o reset
+            console.log('Configurando filtros de relatório (14 e 83)...');
+            await page.locator('div[id="form:grupo"] .ui-selectonemenu-trigger').click();
+            await page.waitForTimeout(1000);
+            await page.locator('.ui-selectonemenu-panel:visible li').filter({ hasText: /^14 -/ }).click();
+            await page.waitForTimeout(2000);
+            await page.locator('div[id*="relatorio"] .ui-selectonemenu-trigger, .ui-selectonemenu:not(.ui-state-disabled)').last().click();
+            await page.waitForTimeout(1000);
+            await page.locator('.ui-selectonemenu-panel:visible li').filter({ hasText: /^83 -/ }).click();
+            await page.waitForTimeout(3000);
+
+            let dateSet = false;
+
+            for (let i = (j === periodIdx ? cdIndex : 0); i < FILIAIS.length; i++) {
                 const filial = FILIAIS[i];
-                const baseOutputPath = process.env.BASE_OUTPUT_PATH;
-                const sep = (baseOutputPath.startsWith('//') || baseOutputPath.startsWith('\\\\')) ? '\\' : path.sep;
-                const finalPath = `${baseOutputPath}${sep}${filial.pasta}${sep}${period.label}.csv`;
 
-                console.log(`\n>>> [${period.label}] Filial: ${filial.nome}`);
+                // --- VERIFICAÇÃO INTELIGENTE DE HISTÓRICO ---
+                const baseOutputPath = process.env.BASE_OUTPUT_PATH || './downloads';
+                
+                // No Linux, path.join colapsa // em /. Precisamos manter // para o SMB.
+                const isSmb = baseOutputPath.startsWith('//') || baseOutputPath.startsWith('\\\\');
+                const sep = isSmb ? (baseOutputPath.includes('\\') ? '\\' : '/') : path.sep;
+                
+                const finalPath = isSmb 
+                    ? `${baseOutputPath}${sep}${filial.pasta}${sep}${period.label}.csv`
+                    : path.join(baseOutputPath, filial.pasta, `${period.label}.csv`);
 
-                // Configurar Filial (Com Retry para lentidão)
-                async function selectFilial(retries = 2) {
-                    try {
-                        console.log(`   + Aguardando seletor de unidade...`);
-                        // Espera qualquer bloqueio de tela (loading) sumir
-                        await page.waitForSelector('.ui-blockui, .ui-widget-overlay', { state: 'hidden', timeout: 60000 }).catch(() => {});
-                        
-                        const unitTrigger = page.locator('div[id*="unidade"], .ui-selectonemenu').filter({ hasText: /Unidade/i }).locator('.ui-selectonemenu-trigger').first();
-                        
-                        // Tenta esperar o elemento, se falhar, tenta um seletor alternativo
-                        try {
-                            await unitTrigger.waitFor({ state: 'visible', timeout: 60000 });
-                        } catch (e) {
-                            console.log('   + Seletor primário falhou, tentando seletor secundário...');
-                            await page.locator('.ui-selectonemenu-trigger').first().waitFor({ state: 'visible', timeout: 30000 });
+                if (await storage.exists(finalPath)) {
+                    const mtime = await storage.getMTime(finalPath);
+                    if (mtime) {
+                        const diffMin = Math.round((new Date() - mtime) / (1000 * 60));
+                        if (diffMin < 20) {
+                            console.log(`⏩ [${period.label}] ${filial.nome} já baixado há ${diffMin}min. Pulando...`);
+                            continue;
                         }
-
-                        await unitTrigger.click();
-                        await page.waitForTimeout(2000);
-                        await page.locator('.ui-selectonemenu-panel:visible li').filter({ hasText: new RegExp(`^${filial.nome}`, 'i') }).click();
-                        await page.waitForTimeout(3000);
-                    } catch (e) {
-                        if (retries > 0) {
-                            console.log(`⚠️ Lentidão extrema na filial ${filial.nome}. Forçando recarregamento da página (F5)...`);
-                            await page.reload({ waitUntil: 'networkidle' });
-                            await page.waitForTimeout(5000);
-                            await setupFilters(false); 
-                            return selectFilial(retries - 1);
-                        }
-                        throw e;
                     }
                 }
-                await selectFilial();
 
-                // Configurar Datas
-                console.log(`Configurando datas (${period.label})...`);
-                const lastDay = new Date(period.year, period.month, 0).getDate();
-                const dayEnd = Math.min(parseInt(period.end), lastDay).toString().padStart(2, '0');
+                console.log(`\n>>> [${period.label}] Filial: ${filial.nome}`);
+                await page.click('button[id="form:bt_filtro"]');
+                await page.waitForTimeout(1500);
 
-                await page.fill('input[id*="dataInicio_input"]', `01/${period.month.toString().padStart(2, '0')}/${period.year}`);
-                await page.keyboard.press('Enter');
-                await page.fill('input[id*="dataFim_input"]', `${dayEnd}/${period.month.toString().padStart(2, '0')}/${period.year}`);
-                await page.keyboard.press('Enter');
+                if (!dateSet) {
+                    console.log(`Configurando datas (${period.label})...`);
+                    const dateInputs = page.locator('input[id$="data__input"]');
+
+                    if (period.isLastMonth) {
+                        // Como a página foi resetada, o calendário SEMPRE começa no mês atual.
+                        // Para o mês passado, basta clicar em "Voltar" (prev) UMA vez.
+
+                        await dateInputs.first().click();
+                        await page.waitForTimeout(500);
+                        await page.click('.ui-datepicker-prev:visible');
+                        await page.waitForTimeout(500);
+                        await page.click(`.ui-datepicker-calendar:visible a:text-is("${period.start}")`);
+
+                        await dateInputs.last().click();
+                        await page.waitForTimeout(500);
+                        await page.click('.ui-datepicker-prev:visible');
+                        await page.waitForTimeout(500);
+                        await page.click(`.ui-datepicker-calendar:visible a:text-is("${period.end}")`);
+                    } else {
+                        // Mês Atual: Não clica em nada, seleciona direto no calendário atual
+                        await dateInputs.first().click();
+                        await page.waitForTimeout(500);
+                        await page.click(`.ui-datepicker-calendar:visible a:text-is("${period.start}")`);
+                        await page.waitForTimeout(500);
+                        await dateInputs.last().click();
+                        await page.waitForTimeout(500);
+                        await page.click(`.ui-datepicker-calendar:visible a:text-is("${period.end}")`);
+                    }
+                    dateSet = true;
+                }
+
+                // Selecionar Filial
+                await page.locator('label[id$=":2:mq__label"]').click();
                 await page.waitForTimeout(1000);
+                const panel = page.locator('.ui-selectcheckboxmenu-panel:visible');
+                const allChk = panel.locator('.ui-selectcheckboxmenu-header .ui-chkbox-box');
+                await allChk.click(); await page.waitForTimeout(300); await allChk.click();
+                await panel.locator('li').filter({ hasText: new RegExp(`^${filial.nome}$`, 'i') }).locator('.ui-chkbox-box').click();
+                await page.keyboard.press('Escape');
 
                 console.log('Consultando...');
-                await page.click('button:has-text("Consultar")');
+                await page.click('.ui-dialog:visible button:has-text("consultar")');
 
                 console.log('Aguardando carregamento...');
-                try {
-                    const limitMsg = page.locator('text=/limite de execução/i, .ui-messages-error-detail, .ui-growl-item-container').first();
-                    const results = page.locator('.ui-datatable-data tr').first();
-                    
-                    const result = await Promise.race([
-                        results.waitFor({ state: 'visible', timeout: 120000 }).then(() => 'ok'),
-                        limitMsg.waitFor({ state: 'visible', timeout: 120000 }).then(() => 'limit'),
-                        page.waitForTimeout(125000).then(() => 'timeout')
-                    ]);
+                const loading = page.locator('.ui-dialog:visible:has-text("Carregando...")');
+                const limitMsg = page.locator('text=/limite de execução/i')
+                    .or(page.locator('.ui-messages-error-detail'))
+                    .or(page.locator('.ui-growl-item-container'));
+                
+                // Espera o carregamento sumir OU a mensagem de limite aparecer
+                await Promise.race([
+                    loading.waitFor({ state: 'hidden', timeout: 180000 }),
+                    limitMsg.first().waitFor({ state: 'visible', timeout: 180000 }).then(async () => {
+                        const text = await limitMsg.first().innerText();
+                        if (text.toLowerCase().includes('limite de execução')) {
+                            throw new Error('LIMITE_ATINGIDO');
+                        }
+                    })
+                ]).catch(err => {
+                    if (err.message === 'LIMITE_ATINGIDO' || (err.message && err.message.includes('timeout'))) {
+                        if (err.message === 'LIMITE_ATINGIDO') throw err;
+                    }
+                });
 
-                    if (result === 'limit') {
+                // Checagem de segurança pós-carregamento
+                if (await limitMsg.first().isVisible()) {
+                    const text = await limitMsg.first().innerText();
+                    if (text.toLowerCase().includes('limite de execução')) {
+                        console.log('⚠️ Limite atingido detectado após carregamento.');
                         throw new Error('LIMITE_ATINGIDO');
                     }
-                    if (result === 'timeout') {
-                        console.log('⚠️ Timeout no carregamento. Tentando próximo...');
-                        continue;
-                    }
-                } catch (e) {
-                    if (e.message === 'LIMITE_ATINGIDO') throw e;
-                    console.log('⚠️ Erro ao aguardar resultados, tentando prosseguir...');
                 }
 
                 console.log('Iniciando download...');
-                const [download] = await Promise.all([
-                    page.waitForEvent('download', { timeout: 60000 }),
-                    page.click('button[title="Exportar para CSV"]')
-                ]);
+                await page.waitForTimeout(3000);
+                const downloadBtn = page.locator('button').filter({ hasText: /^Download de Arquivo CSV - separado por ','$/ }).first();
+                
+                try {
+                    await downloadBtn.scrollIntoViewIfNeeded();
+                    await downloadBtn.waitFor({ state: 'visible', timeout: 30000 });
+                } catch (e) {
+                    console.log('⚠️ Botão de download não apareceu. Verificando se há dados...');
+                    const noData = await page.locator('text=/nenhum registro encontrado/i').isVisible().catch(() => false);
+                    if (noData) {
+                        console.log('ℹ️ Nenhum dado encontrado para esta filial/período.');
+                        continue;
+                    }
+                    throw new Error('Botão de download não encontrado após consulta.');
+                }
+                
+                const downloadPromise = page.waitForEvent('download', { timeout: 180000 });
+                await downloadBtn.evaluate(el => el.click());
+                const download = await downloadPromise;
+                console.log('📡 Evento de download recebido.');
 
-                await storage.mkdir(path.dirname(finalPath));
+                // Usar a lógica de storage unificada
+                const parentDir = isSmb 
+                    ? `${baseOutputPath}${sep}${filial.pasta}`
+                    : path.dirname(finalPath);
+
+                console.log(`📁 Criando diretório: ${parentDir}`);
+                await storage.mkdir(parentDir);
+                console.log(`💾 Salvando arquivo em: ${finalPath}`);
                 await storage.save(download, finalPath);
+                console.log(`✅ Concluído: ${finalPath}`);
             }
-            cdIndex = 0; // Reinicia filiais para o próximo período
         }
 
         console.log('\n🏁 TODAS AS FILIAIS E PERÍODOS CONCLUÍDOS!');
-        process.exit(0);
+        await browser.close();
+        if (rl) rl.close();
+        process.exit(0); // Força a saída com sucesso
 
     } catch (error) {
         if (error.message === 'LIMITE_ATINGIDO') {
@@ -445,17 +493,12 @@ async function run(userIndex, cdIndex, periodIdx, selectedPeriods) {
             console.log('🔄 Tentando recuperar com próximo usuário...');
             return run(userIndex + 1, cdIndex, periodIdx, selectedPeriods);
         }
-        
-        console.error('❌ Falha fatal: Todos os usuários tentados ou erro irrecuperável.');
-        process.exit(1); 
     } finally {
         await browser.close().catch(() => { });
     }
 }
 
 async function start() {
-    cleanupTempFiles();
-    cleanupSmbFiles();
     console.log('\n======================================');
     console.log('   MYTRACKING AUTOMATION - BASE 83');
     console.log('======================================');
@@ -463,6 +506,7 @@ async function start() {
     console.log('2 - Baixar Mês PASSADO (Split 01 e 02)');
     console.log('3 - Baixar AMBOS (Atual + Passado)');
     
+    // Detecta se o ambiente é interativo (TTY)
     const isInteractive = process.stdin.isTTY;
     
     let opt;
